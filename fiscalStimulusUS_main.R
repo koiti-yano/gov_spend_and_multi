@@ -13,16 +13,24 @@ setwd("C:/Users/koiti/Dropbox/program/R/1_fiscalPolicyAndCausality/src")
 require(vars) # Firstly loaded to avoid a name-collision of select 
 require(WeightIt)
 require(cobalt)
-require(tidyverse) # For pipe
 require(openxlsx) # For openxlsx
 require(seasonal) # For seas
 require(broom) # For tidy()
 require(huxtable)
 require(jtools) # For summ() #install.packages("flextable"); install.packages("officer")
-
 require(fredr) # https://github.com/sboysel/fredr
-
 fredr_set_key("d88c682c8274047b72e7e64da46a7801")
+
+require(tidyverse) # For pipe and dplyr
+# Conflicts between the tidyverse (dplyr) and other packages
+# https://tidyverse.tidyverse.org/reference/tidyverse_conflicts.html
+# Ref: Handling dplyr and MASS select clashes
+# https://hollyemblem.medium.com/handling-dplyr-and-mass-select-clashes-7c88258fd9d0
+tidyverse_conflicts()
+select <- dplyr::select
+flter <- dplyr::filter
+lag <- dplyr::lag
+
 
 #freqFlag <- "m" # Monthly
 freqFlag <- "q" # Quarterly
@@ -149,11 +157,11 @@ macroData <- inner_join(dataGDP, dataDef, by="date") %>%
   inner_join(dataGCE, by="date") %>% 
   inner_join(dataSpread, by="date")
 
-macroData <- macroData %>% select(-series_id.x, -series_id.y, 
-                                  -series_id.x.x, -series_id.y.y, 
-                                  -series_id.x.x.x, -series_id.y.y.y)
+#??????????????
+macroDataSelect <- macroData %>% select(date, gdp, price, commo, 
+                                        add, govSpend, spread)
 
-macroDataTmp <- macroData %>%
+macroDataTmp <- macroDataSelect %>%
   mutate(gdpLog = log(gdp), priceLog = log(price), 
          commoLog = log(commo), addLog = log(add),
          govSpendLog = log(govSpend))
@@ -195,15 +203,15 @@ for (ii in 1:(sampleSize-1)){
 }
 
 if(plotFlag){
-  par(mfrow=c(1,1))
+  par(mfrow=c(1,3))
   plot(macroDataTs[,"gdpLog"]) 
   lines(ts(obsHat[,1], start=dataStart, end=dataEnd, freq=4), col=2)
+  
   hist(macroDataTs[,"gdpLog"]-ts(obsHat[,1], start=dataStart, end=dataEnd, freq=4))
   
   plot(macroDataTs[,"commoLog"]) 
   lines(ts(obsHat[,3], start=dataStart, end=dataEnd, freq=4), col=2)
 }
-
 
 macroDataFrm <- macroDataTmp %>% 
   mutate(gdpHat = obsHat[,1])
@@ -212,32 +220,40 @@ macroDataFrm %>% head()
 
 # You cannot use diff in mutate. Use lag().
 # https://notchained.hatenablog.com/entry/2015/04/24/223027
-macroDataFrm <- macroDataFrm %>% 
+#macroDataFrm1 <- macroDataFrm %>% 
+#  mutate(gdpLogLag = lag(gdpLog)) %>%
+#  mutate(priceLogLag = lag(priceLog, order_by = date)) %>% 
+#  mutate(commoLogLag= lag(commoLog)) %>%
+#  mutate(addLogLag = lag(addLog)) %>%
+#  mutate(gdpHatLag = lag(gdpHat)) %>%
+#  mutate(govSpendLogLag = lag(govSpendLog)) 
+
+macroDataFrm2 <- macroDataFrm %>% 
   mutate(gdpDiff = (gdpLog-lag(gdpLog))) %>%
-  mutate(priceDiff = (priceLog-lag(priceLog))) %>% 
+  mutate(priceDiff = (priceLog-lag(priceLog, order_by = date))) %>% 
   mutate(commoDiff = (commoLog-lag(commoLog))) %>%
   mutate(addDiff = (addLog-lag(addLog))) %>%
   mutate(growthHat = (gdpLog-lag(gdpHat))) %>%
   mutate(govSpendDiff = (govSpendLog-lag(govSpendLog))) 
 
-macroDataFrm <- macroDataFrm %>% 
+macroDataFrm3 <- macroDataFrm2 %>% 
   mutate(gdpDiffLag1 = lag(gdpDiff)) %>%
   mutate(priceDiffLag1 = lag(priceDiff)) %>%
   mutate(commoDiffLag1 = lag(commoDiff)) %>%
   mutate(addDiffLag1 = lag(addDiff)) %>% 
   mutate(spreadLag1 = lag(spread))
 
-macroDataFrm <- macroDataFrm %>% 
+macroDataFrm4 <- macroDataFrm3 %>% 
   mutate(gdpDiffLag2 = lag(gdpDiffLag1)) %>%
   mutate(priceDiffLag2 = lag(priceDiffLag1)) %>%
   mutate(commoDiffLag2 = lag(commoDiffLag1)) %>%
   mutate(addDiffLag2 = lag(addDiffLag1))
 
-gsMean <- macroDataFrm %>% summarise(mean(govSpendDiff, na.rm=T)) %>% as.numeric()
-treatSd <- macroDataFrm %>% summarise(sd(govSpendDiff, na.rm=T)) %>% as.numeric()
+gsMean <- macroDataFrm4 %>% summarise(mean(govSpendDiff, na.rm=T)) %>% as.numeric()
+treatSd <- macroDataFrm4 %>% summarise(sd(govSpendDiff, na.rm=T)) %>% as.numeric()
 
 # https://dplyr.tidyverse.org/reference/case_when.html
-macroDataFrm <- macroDataFrm %>%
+macroDataFrm5 <- macroDataFrm4 %>%
   mutate(
     fiscStmCatgry = case_when(
       ((govSpendDiff-gsMean) < - treatSd) ~ "ContLarg",
@@ -247,7 +263,7 @@ macroDataFrm <- macroDataFrm %>%
     )
   ) 
 
-macroDataNaOmit <- na.omit(macroDataFrm)
+macroDataNaOmit <- na.omit(macroDataFrm5)
 
 macroDataFinal <- macroDataNaOmit #%>% 
 #  mutate(fiscStmCatgry = as.factor(fiscStmCatgry)) %>%
